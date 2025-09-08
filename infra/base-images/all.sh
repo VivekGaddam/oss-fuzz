@@ -1,5 +1,5 @@
 #!/bin/bash -eux
-# Copyright 2016 Google Inc.
+# Copyright 2025 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,14 +15,41 @@
 #
 ################################################################################
 
-docker build --pull -t gcr.io/oss-fuzz-base/base-image "$@" infra/base-images/base-image
-docker build -t gcr.io/oss-fuzz-base/base-clang "$@" infra/base-images/base-clang
-docker build -t gcr.io/oss-fuzz-base/base-builder "$@" infra/base-images/base-builder
-docker build -t gcr.io/oss-fuzz-base/base-builder-go "$@" infra/base-images/base-builder-go
-docker build -t gcr.io/oss-fuzz-base/base-builder-jvm "$@" infra/base-images/base-builder-jvm
-docker build -t gcr.io/oss-fuzz-base/base-builder-python "$@" infra/base-images/base-builder-python
-docker build -t gcr.io/oss-fuzz-base/base-builder-rust "$@" infra/base-images/base-builder-rust
-docker build -t gcr.io/oss-fuzz-base/base-builder-ruby "$@" infra/base-images/base-builder-ruby
-docker build -t gcr.io/oss-fuzz-base/base-builder-swift "$@" infra/base-images/base-builder-swift
-docker build -t gcr.io/oss-fuzz-base/base-runner "$@" infra/base-images/base-runner
-docker build -t gcr.io/oss-fuzz-base/base-runner-debug "$@" infra/base-images/base-runner-debug
+# The first argument is the version tag, e.g., 'latest', 'ubuntu-20-04'.
+VERSION_TAG=${1:-latest}
+
+# Define a function to build a specific image with the correct Dockerfile and tag.
+build_image() {
+  local image_name=$1
+  local image_dir="infra/base-images/$2"
+  local full_image_name="gcr.io/oss-fuzz-base/$image_name"
+  
+  if [ "$VERSION_TAG" == "latest" ]; then
+    dockerfile="$image_dir/Dockerfile"
+  else
+    dockerfile="$image_dir/$VERSION_TAG.Dockerfile"
+  fi
+
+  if [ ! -f "$dockerfile" ]; then
+    echo "Skipping $dockerfile since it does not exist."
+    return
+  fi
+
+  # The '-t' flag tags the image.
+  docker build --pull -t "$full_image_name:$VERSION_TAG" -f "$dockerfile" "$@" "$image_dir"
+}
+
+# Build all base images.
+build_image "base-image" "base-image"
+build_image "base-clang" "base-clang"
+build_image "base-builder" "base-builder"
+build_image "base-builder-go" "base-builder-go"
+build_image "base-builder-jvm" "base-builder-jvm"
+build_image "base-builder-python" "base-builder-python"
+build_image "base-builder-rust" "base-builder-rust"
+build_image "base-builder-ruby" "base-builder-ruby"
+build_image "base-builder-swift" "base-builder-swift"
+build_image "base-runner" "base-runner"
+build_image "base-runner-debug" "base-runner-debug"
+
+echo "Built all images successfully for version $VERSION_TAG"
