@@ -14,42 +14,55 @@
 # limitations under the License.
 #
 ################################################################################
+#
+# A script to build base images locally.
+#
+# This script is a wrapper around `docker build` that dynamically fetches the
+# official list of images from the Python source of truth, ensuring it never
+# goes out of date.
+#
+# Usage:
+#       # Build the 'latest' version of all images.
+#       ./all.sh
+#
+#       # Build the 'ubuntu-24-04' version of all images.
+#       ./all.sh ubuntu-24-04
+#
+################################################################################
 
 # The first argument is the version tag, e.g., 'latest', 'ubuntu-20-04'.
 VERSION_TAG=${1:-latest}
 
-# Define a function to build a specific image with the correct Dockerfile and tag.
-build_image() {
-  local image_name=$1
-  local image_dir="infra/base-images/$2"
-  local full_image_name="gcr.io/oss-fuzz-base/$image_name"
+# Get the directory where this script is located to find the helper script.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+
+# Fetch the official list of images from the Python source of truth.
+# This avoids duplicating the image list and ensures this script is always
+# up-to-date.
+IMAGE_LIST=$(python3 "${SCRIPT_DIR}/list_images.py")
+
+echo "Building version: ${VERSION_TAG}"
+echo "Images to build: ${IMAGE_LIST}"
+
+# Loop through the official list of images and build each one.
+for image_name in ${IMAGE_LIST}; do
+  image_dir="infra/base-images/${image_name}"
   
-  if [ "$VERSION_TAG" == "latest" ]; then
-    dockerfile="$image_dir/Dockerfile"
+  if [ "${VERSION_TAG}" == "latest" ]; then
+    dockerfile="${image_dir}/Dockerfile"
+    tag="gcr.io/oss-fuzz-base/${image_name}"
   else
-    dockerfile="$image_dir/$VERSION_TAG.Dockerfile"
+    dockerfile="${image_dir}/${VERSION_TAG}.Dockerfile"
+    tag="gcr.io/oss-fuzz-base/${image_name}:${VERSION_TAG}"
   fi
 
-  if [ ! -f "$dockerfile" ]; then
-    echo "Skipping $dockerfile since it does not exist."
-    return
+  if [ ! -f "${dockerfile}" ]; then
+    echo "Skipping build for ${image_name}:${VERSION_TAG} - Dockerfile not found at ${dockerfile}"
+    continue
   fi
 
-  # The '-t' flag tags the image.
-  docker build --pull -t "$full_image_name:$VERSION_TAG" -f "$dockerfile" "$@" "$image_dir"
-}
+  echo "Building ${tag} from ${dockerfile}..."
+  docker build --pull -t "${tag}" -f "${dockerfile}" "${image_dir}"
+done
 
-# Build all base images.
-build_image "base-image" "base-image"
-build_image "base-clang" "base-clang"
-build_image "base-builder" "base-builder"
-build_image "base-builder-go" "base-builder-go"
-build_image "base-builder-jvm" "base-builder-jvm"
-build_image "base-builder-python" "base-builder-python"
-build_image "base-builder-rust" "base-builder-rust"
-build_image "base-builder-ruby" "base-builder-ruby"
-build_image "base-builder-swift" "base-builder-swift"
-build_image "base-runner" "base-runner"
-build_image "base-runner-debug" "base-runner-debug"
-
-echo "Built all images successfully for version $VERSION_TAG"
+echo "All builds for version ${VERSION_TAG} completed successfully."

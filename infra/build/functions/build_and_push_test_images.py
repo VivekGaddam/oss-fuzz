@@ -34,6 +34,9 @@ IMAGES_DIR = os.path.join(INFRA_DIR, 'base-images')
 OSS_FUZZ_ROOT = os.path.dirname(INFRA_DIR)
 GCB_BUILD_TAGS = ['trial-build']
 
+# Add the new Ubuntu versions to the list of versions to build.
+BASE_IMAGE_VERSIONS = ['latest', 'ubuntu-20-04', 'ubuntu-24-04']
+
 
 def push_image(tag):
   """Pushes image with |tag| to docker registry."""
@@ -78,13 +81,18 @@ def _run_cloudbuild(build_body):
                  check=True)
 
 
-def get_image_tags(image: str, test_image_suffix: str | None = None):
+def get_image_tags(image: str,
+                   test_image_suffix: str | None = None,
+                   version: str = 'latest'):
   """Returns tags for image build."""
-  main_tag = base_images.TAG_PREFIX + image
-  test_tag = None
+  if version == 'latest':
+    main_tag = base_images.TAG_PREFIX + image
+  else:
+    main_tag = f'{base_images.TAG_PREFIX}{image}:{version}'
 
+  test_tag = None
   if test_image_suffix:
-    test_tag = main_tag + '-' + test_image_suffix
+    test_tag = f'{main_tag}-{test_image_suffix}'
 
   return main_tag, test_tag
 
@@ -93,15 +101,29 @@ def gcb_build_and_push_images(test_image_suffix: str):
   """Build and push test versions of base images using GCB."""
   steps = []
   test_tags = []
-  for base_image in base_images.BASE_IMAGES:
-    main_tag, test_tag = get_image_tags(base_image.name, test_image_suffix)
-    test_tags.append(test_tag)
-    step = build_lib.get_docker_build_step([main_tag, test_tag],
-                                           base_image.path,
-                                           use_buildkit_cache=True,
-                                           src_root='.',
-                                           build_args=base_image.build_args)
-    steps.append(step)
+  for version in BASE_IMAGE_VERSIONS:
+    for base_image in base_images.BASE_IMAGES:
+      main_tag, test_tag = get_image_tags(base_image.name, test_image_suffix,
+                                          version)
+      test_tags.append(test_tag)
+
+      if version == 'latest':
+        dockerfile = base_image.path
+      else:
+        dockerfile = os.path.join(base_image.path, f'{version}.Dockerfile')
+
+      # Skip building if the Dockerfile does not exist.
+      if not os.path.exists(os.path.join(OSS_FUZZ_ROOT, dockerfile)):
+        logging.info('Skipping %s for version %s as it does not exist.',
+                     dockerfile, version)
+        continue
+
+      step = build_lib.get_docker_build_step([main_tag, test_tag],
+                                             dockerfile,
+                                             use_buildkit_cache=True,
+                                             src_root='.',
+                                             build_args=base_image.build_args)
+      steps.append(step)
 
   overrides = {'images': test_tags}
   build_body = build_lib.get_build_body(steps, base_images.TIMEOUT, overrides,
@@ -129,13 +151,24 @@ def build_and_push_images(test_image_suffix):
           'base-builder-ruby',
       ],
   ]
-  os.environ['DOCKER_BUILDKIT'] = '1'
+  os.environ['DOKER_BUILDKIT'] = '1'
   max_parallelization = max([len(image_list) for image_list in images])
   proc_count = min(multiprocessing.cpu_count(), max_parallelization)
   logging.info('Using %d parallel processes.', proc_count)
   with multiprocessing.Pool(proc_count) as pool:
     for image_list in images:
-      args_list = [(image, test_image_suffix) for image in image_list]
+      args_list = []
+      for image in image_list:
+        for version in BASE_IMAGE_VERSIONS:
+          # Check if the specific versioned Dockerfile exists before adding.
+          if version == 'latest':
+            dockerfile_path = os.path.join(IMAGES_DIR, image, 'Dockerfile')
+          else:
+            dockerfile_path = os.path.join(IMAGES_DIR, image,
+                                           f'{version}.Dockerfile')
+          if os.path.exists(dockerfile_path):
+            args_list.append((image, test_image_suffix, version))
+
       pool.starmap(build_and_push_image, args_list)
 
 
