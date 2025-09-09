@@ -381,7 +381,7 @@ def trial_build_main(args=None, local_base_build=True):
   end_time = datetime.datetime.now() + datetime.timedelta(seconds=timeout)
   logging.info(f'Timeout: {timeout}, trial build end time: {end_time}')
   if args.branch:
-    test_image_suffix = f'{TEST_IMAGE_SUFFIX}-{args.branch.lower()}'
+    test_image_suffix = f'{TEST_IMAGE_SUFFIX}-{args.branch.lower().replace("/", "-")}'
   else:
     test_image_suffix = TEST_IMAGE_SUFFIX
   if local_base_build:
